@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"sync"
 
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -95,25 +94,4 @@ func listOptions(labelSelector labels.Set) meta.ListOptions {
 		opts.LabelSelector = labels.SelectorFromSet(labelSelector).String()
 	}
 	return opts
-}
-
-// Subscribe writes to the given channel whenever relevant information has changed
-// in the current snapshot
-func Subscribe(c context.Context, cond *sync.Cond) <-chan struct{} {
-	ch := make(chan struct{})
-	go func() {
-		for {
-			cond.L.Lock()
-			cond.Wait()
-			cond.L.Unlock()
-
-			select {
-			case <-c.Done():
-				close(ch)
-				return
-			case ch <- struct{}{}:
-			}
-		}
-	}()
-	return ch
 }
