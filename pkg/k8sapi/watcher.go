@@ -26,7 +26,7 @@ import (
 const resyncPeriod = 2 * time.Minute
 
 // Watcher watches some resource and can be cancelled.
-type Watcher struct {
+type Watcher[T any] struct {
 	sync.Mutex
 	cancel         context.CancelFunc
 	resource       string
@@ -65,8 +65,8 @@ func newListerWatcher(c context.Context, getter cache.Getter, resource, namespac
 	return &cache.ListWatch{ListFunc: listFunc, WatchFunc: watchFunc}
 }
 
-func NewWatcher(resource, namespace string, getter cache.Getter, objType runtime.Object, cond *sync.Cond, equals func(runtime.Object, runtime.Object) bool) *Watcher {
-	return &Watcher{
+func NewWatcher[T runtime.Object](resource, namespace string, getter cache.Getter, objType T, cond *sync.Cond, equals func(runtime.Object, runtime.Object) bool) *Watcher[T] {
+	return &Watcher[T]{
 		resource:  resource,
 		namespace: namespace,
 		equals:    equals,
@@ -78,14 +78,14 @@ func NewWatcher(resource, namespace string, getter cache.Getter, objType runtime
 
 // AddStateListener adds a listener function that will be called when the watcher
 // changes its state (starts or is cancelled).
-func (w *Watcher) AddStateListener(l *StateListener) {
+func (w *Watcher[T]) AddStateListener(l *StateListener) {
 	w.Lock()
 	w.stateListeners = append(w.stateListeners, l)
 	w.Unlock()
 }
 
 // RemoveStateListener removes a listener function.
-func (w *Watcher) RemoveStateListener(rl *StateListener) {
+func (w *Watcher[T]) RemoveStateListener(rl *StateListener) {
 	w.Lock()
 	sls := w.stateListeners
 	last := len(sls) - 1
@@ -101,7 +101,7 @@ func (w *Watcher) RemoveStateListener(rl *StateListener) {
 	w.Unlock()
 }
 
-func (w *Watcher) Cancel() {
+func (w *Watcher[T]) Cancel() {
 	w.Lock()
 	if w.cancel != nil {
 		w.cancel()
@@ -111,7 +111,7 @@ func (w *Watcher) Cancel() {
 	w.Unlock()
 }
 
-func (w *Watcher) callStateListeners() {
+func (w *Watcher[T]) callStateListeners() {
 	sl := make([]*StateListener, len(w.stateListeners))
 	copy(sl, w.stateListeners)
 	w.Unlock()
@@ -122,7 +122,7 @@ func (w *Watcher) callStateListeners() {
 }
 
 // HasSynced returns true if this Watcher's controller has synced, or if this watcher hasn't started yet.
-func (w *Watcher) HasSynced() bool {
+func (w *Watcher[T]) HasSynced() bool {
 	w.Lock()
 	defer w.Unlock()
 	if w.controller != nil {
@@ -131,16 +131,17 @@ func (w *Watcher) HasSynced() bool {
 	return true
 }
 
-func (w *Watcher) Get(c context.Context, obj any) (any, bool, error) {
+func (w *Watcher[T]) Get(c context.Context, obj any) (T, bool, error) {
 	w.Lock()
 	defer w.Unlock()
 	if w.store == nil {
 		w.startOnDemand(c)
 	}
-	return w.store.Get(obj)
+	t, b, e := w.store.Get(obj)
+	return t.(T), b, e
 }
 
-func (w *Watcher) EnsureStarted(c context.Context, cb func(bool)) {
+func (w *Watcher[T]) EnsureStarted(c context.Context, cb func(bool)) {
 	w.Lock()
 	defer w.Unlock()
 	if w.store == nil {
@@ -158,24 +159,29 @@ func (w *Watcher) EnsureStarted(c context.Context, cb func(bool)) {
 	}
 }
 
-func (w *Watcher) List(c context.Context) []any {
+func (w *Watcher[T]) List(c context.Context) []T {
 	w.Lock()
 	defer w.Unlock()
 	if w.store == nil {
 		w.startOnDemand(c)
 	}
-	return w.store.List()
+	ls := w.store.List()
+	ts := make([]T, len(ls))
+	for i, l := range ls {
+		ts[i] = l.(T)
+	}
+	return ts
 }
 
 // Active returns true if the watcher has been started and not yet cancelled.
-func (w *Watcher) Active() bool {
+func (w *Watcher[T]) Active() bool {
 	w.Lock()
 	active := w.cancel != nil
 	w.Unlock()
 	return active
 }
 
-func (w *Watcher) Watch(c context.Context, ready *sync.WaitGroup) {
+func (w *Watcher[T]) Watch(c context.Context, ready *sync.WaitGroup) {
 	func() {
 		w.Lock()
 		defer w.Unlock()
@@ -184,7 +190,7 @@ func (w *Watcher) Watch(c context.Context, ready *sync.WaitGroup) {
 	w.run(c)
 }
 
-func (w *Watcher) startOnDemand(c context.Context) {
+func (w *Watcher[T]) startOnDemand(c context.Context) {
 	rdy := sync.WaitGroup{}
 	rdy.Add(1)
 	c = w.startLocked(c, &rdy)
@@ -194,7 +200,7 @@ func (w *Watcher) startOnDemand(c context.Context) {
 	w.callStateListeners()
 }
 
-func (w *Watcher) startLocked(c context.Context, ready *sync.WaitGroup) context.Context {
+func (w *Watcher[T]) startLocked(c context.Context, ready *sync.WaitGroup) context.Context {
 	defer ready.Done()
 
 	c, w.cancel = context.WithCancel(c)
@@ -226,13 +232,13 @@ func (w *Watcher) startLocked(c context.Context, ready *sync.WaitGroup) context.
 	return c
 }
 
-func (w *Watcher) run(c context.Context) {
+func (w *Watcher[T]) run(c context.Context) {
 	defer dlog.Debugf(c, "Watcher for %s in %s stopped", w.resource, w.namespace)
 	dlog.Debugf(c, "Watcher for %s in %s started", w.resource, w.namespace)
 	w.controller.Run(c.Done())
 }
 
-func (w *Watcher) process(c context.Context, ds cache.Deltas, eventCh chan<- struct{}) error {
+func (w *Watcher[T]) process(c context.Context, ds cache.Deltas, eventCh chan<- struct{}) error {
 	// from oldest to newest
 	for _, d := range ds {
 		var verb string
@@ -271,8 +277,8 @@ func (w *Watcher) process(c context.Context, ds cache.Deltas, eventCh chan<- str
 const idleTriggerDuration = 50 * time.Millisecond
 
 // handleEvents reads the channel and broadcasts on the condition once the channel has
-// been quite for idleTriggerDuration.
-func (w *Watcher) handleEvents(c context.Context, eventCh <-chan struct{}) {
+// been quiet for idleTriggerDuration.
+func (w *Watcher[T]) handleEvents(c context.Context, eventCh <-chan struct{}) {
 	idleTrigger := time.NewTimer(time.Duration(math.MaxInt64))
 	idleTrigger.Stop()
 	for {
@@ -288,7 +294,7 @@ func (w *Watcher) handleEvents(c context.Context, eventCh <-chan struct{}) {
 	}
 }
 
-func (w *Watcher) errorHandler(c context.Context, err error) {
+func (w *Watcher[T]) errorHandler(c context.Context, err error) {
 	switch {
 	case errors.Is(err, context.Canceled):
 		// Just ignore. This happens during a normal shutdown
