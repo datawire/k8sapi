@@ -65,6 +65,14 @@ func newListerWatcher(c context.Context, getter cache.Getter, resource, namespac
 	return &cache.ListWatch{ListFunc: listFunc, WatchFunc: watchFunc}
 }
 
+// NewWatcher returns a new watcher. It will not do anything until it is started.
+//
+//	resource string: the kind of resouce you want to watch, like "pods"
+//	namespace string: the namespace to be watched. An empty string watches all namespaces.
+//	getter cache.Getter: a kubernetes rest.Interface client, like clientset.CoreV1().RESTClient()
+//	objType T: an object of the resource type, like &corev1.Pod{}
+//	cond *sync.Cond: cond will broadcast when the cache changes. Use k8sapi.Subscribe to subscribe to events
+//	equals func(T, T) bool: checks if a new obj is equal to a cached obj. If true is returned, an update is not triggered. If this func is nil, an update is always triggered.
 func NewWatcher[T runtime.Object](resource, namespace string, getter cache.Getter, objType T, cond *sync.Cond, equals func(T, T) bool) *Watcher[T] {
 	return &Watcher[T]{
 		resource:  resource,
@@ -131,14 +139,16 @@ func (w *Watcher[T]) HasSynced() bool {
 	return true
 }
 
-// key is a string because our keyfunc returns (string, error)
-func (w *Watcher[T]) Get(c context.Context, key string) (T, bool, error) {
+// obj T: an object that would generate the same key as the object you
+// want. For our keyfunc, you need to populate name and, if the object is
+// scoped to a namespace, namespace.
+func (w *Watcher[T]) Get(c context.Context, obj T) (T, bool, error) {
 	w.Lock()
 	defer w.Unlock()
 	if w.store == nil {
 		w.startOnDemand(c)
 	}
-	t, b, e := w.store.Get(key)
+	t, b, e := w.store.Get(obj)
 	if t == nil {
 		var zeroValue T
 		return zeroValue, b, e
