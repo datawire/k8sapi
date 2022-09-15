@@ -138,6 +138,10 @@ func (w *Watcher[T]) Get(c context.Context, obj any) (T, bool, error) {
 		w.startOnDemand(c)
 	}
 	t, b, e := w.store.Get(obj)
+	if t == nil {
+		var zeroValue T
+		return zeroValue, b, e
+	}
 	return t.(T), b, e
 }
 
