@@ -330,3 +330,7 @@ func (w *Watcher[T]) errorHandler(c context.Context, err error) {
 		utilruntime.HandleError(err)
 	}
 }
+
+func (w *Watcher[T]) ListKeys(c context.Context) []string {
+	return w.store.ListKeys()
+}
