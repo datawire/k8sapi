@@ -257,7 +257,7 @@ func (w *Watcher[T]) process(c context.Context, ds cache.Deltas, eventCh chan<- 
 				if err = w.store.Update(d.Object); err != nil {
 					return err
 				}
-				if w.equals(old.(T), d.Object.(T)) {
+				if w.equals != nil && w.equals(old.(T), d.Object.(T)) {
 					continue
 				}
 				verb = "update"
