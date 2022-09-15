@@ -26,17 +26,17 @@ import (
 const resyncPeriod = 2 * time.Minute
 
 // Watcher watches some resource and can be cancelled
-type Watcher[T any] struct {
+type Watcher[T runtime.Object] struct {
 	sync.Mutex
 	cancel         context.CancelFunc
 	resource       string
 	namespace      string
 	getter         cache.Getter
-	objType        runtime.Object
+	objType        T
 	cond           *sync.Cond
 	controller     cache.Controller
 	store          cache.Store
-	equals         func(runtime.Object, runtime.Object) bool
+	equals         func(T, T) bool
 	stateListeners []*StateListener
 }
 
@@ -65,7 +65,7 @@ func newListerWatcher(c context.Context, getter cache.Getter, resource, namespac
 	return &cache.ListWatch{ListFunc: listFunc, WatchFunc: watchFunc}
 }
 
-func NewWatcher[T runtime.Object](resource, namespace string, getter cache.Getter, objType T, cond *sync.Cond, equals func(runtime.Object, runtime.Object) bool) *Watcher[T] {
+func NewWatcher[T runtime.Object](resource, namespace string, getter cache.Getter, objType T, cond *sync.Cond, equals func(T, T) bool) *Watcher[T] {
 	return &Watcher[T]{
 		resource:  resource,
 		namespace: namespace,
@@ -257,7 +257,7 @@ func (w *Watcher[T]) process(c context.Context, ds cache.Deltas, eventCh chan<- 
 				if err = w.store.Update(d.Object); err != nil {
 					return err
 				}
-				if w.equals(old.(runtime.Object), d.Object.(runtime.Object)) {
+				if w.equals(old.(T), d.Object.(T)) {
 					continue
 				}
 				verb = "update"
