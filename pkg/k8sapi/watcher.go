@@ -131,13 +131,14 @@ func (w *Watcher[T]) HasSynced() bool {
 	return true
 }
 
-func (w *Watcher[T]) Get(c context.Context, obj any) (T, bool, error) {
+// key is a string because our keyfunc returns (string, error)
+func (w *Watcher[T]) Get(c context.Context, key string) (T, bool, error) {
 	w.Lock()
 	defer w.Unlock()
 	if w.store == nil {
 		w.startOnDemand(c)
 	}
-	t, b, e := w.store.Get(obj)
+	t, b, e := w.store.Get(key)
 	if t == nil {
 		var zeroValue T
 		return zeroValue, b, e
@@ -331,6 +332,6 @@ func (w *Watcher[T]) errorHandler(c context.Context, err error) {
 	}
 }
 
-func (w *Watcher[T]) ListKeys(c context.Context) []string {
+func (w *Watcher[T]) ListKeys() []string {
 	return w.store.ListKeys()
 }
