@@ -43,7 +43,7 @@ func (w WatcherGroup[T]) Get(ctx context.Context, namespace string, obj T) (T, b
 	return watcher.Get(ctx, obj)
 }
 
-func (w WatcherGroup[T]) List(ctx context.Context, namespace string, obj T) []T {
+func (w WatcherGroup[T]) List(ctx context.Context) []T {
 	a := make([]T, 0)
 	for _, v := range w {
 		a = append(a, v.List(ctx)...)
