@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/hashicorp/go-multierror"
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
@@ -43,10 +44,18 @@ func (w WatcherGroup[T]) Get(ctx context.Context, namespace string, obj T) (T, b
 	return watcher.Get(ctx, obj)
 }
 
-func (w WatcherGroup[T]) List(ctx context.Context) []T {
+func (w WatcherGroup[T]) List(ctx context.Context) ([]T, error) {
 	a := make([]T, 0)
+	var multiErr error
 	for _, v := range w {
-		a = append(a, v.List(ctx)...)
+		if results, err := v.List(ctx); err != nil {
+			multiErr = multierror.Append(multiErr, err)
+		} else {
+			a = append(a, results...)
+		}
 	}
-	return a
+	if multiErr != nil {
+		return nil, multiErr
+	}
+	return a, nil
 }

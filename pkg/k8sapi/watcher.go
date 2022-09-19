@@ -145,12 +145,14 @@ func (w *Watcher[T]) HasSynced() bool {
 func (w *Watcher[T]) Get(c context.Context, obj T) (T, bool, error) {
 	w.Lock()
 	defer w.Unlock()
+	var zeroValue T
 	if w.store == nil {
-		w.startOnDemand(c)
+		if err := w.startOnDemand(c); err != nil {
+			return zeroValue, false, err
+		}
 	}
 	t, b, e := w.store.Get(obj)
 	if t == nil {
-		var zeroValue T
 		return zeroValue, b, e
 	}
 	return t.(T), b, e
@@ -174,18 +176,20 @@ func (w *Watcher[T]) EnsureStarted(c context.Context, cb func(bool)) {
 	}
 }
 
-func (w *Watcher[T]) List(c context.Context) []T {
+func (w *Watcher[T]) List(c context.Context) ([]T, error) {
 	w.Lock()
 	defer w.Unlock()
 	if w.store == nil {
-		w.startOnDemand(c)
+		if err := w.startOnDemand(c); err != nil {
+			return nil, err
+		}
 	}
 	ls := w.store.List()
 	ts := make([]T, len(ls))
 	for i, l := range ls {
 		ts[i] = l.(T)
 	}
-	return ts
+	return ts, nil
 }
 
 // Active returns true if the watcher has been started and not yet cancelled
@@ -196,31 +200,53 @@ func (w *Watcher[T]) Active() bool {
 	return active
 }
 
-func (w *Watcher[T]) Watch(c context.Context, ready *sync.WaitGroup) {
+func (w *Watcher[T]) Watch(c context.Context, ready *sync.WaitGroup) error {
+	var errCh <-chan error
 	func() {
 		w.Lock()
 		defer w.Unlock()
-		c = w.startLocked(c, ready)
+		c, errCh = w.startLocked(c, ready)
 	}()
 	w.run(c)
+	select {
+	case err := <-errCh:
+		return err
+	default:
+	}
+	return nil
 }
 
-func (w *Watcher[T]) startOnDemand(c context.Context) {
+func (w *Watcher[T]) startOnDemand(c context.Context) error {
 	rdy := sync.WaitGroup{}
 	rdy.Add(1)
-	c = w.startLocked(c, &rdy)
+	c, errCh := w.startLocked(c, &rdy)
 	rdy.Wait()
 	go w.run(c)
+	// We're about to sit waiting for the cache. It's a bad idea to do so while we're holding the lock.
+	// WaitForCacheSync isn't gonna touch any state that the lock cares about anyway, and there are
+	// things going on in the background of startLocked and run that will want that lock
+	w.Unlock()
 	cache.WaitForCacheSync(c.Done(), w.controller.HasSynced)
+	w.Lock()
+	select {
+	case err := <-errCh:
+		if err != nil {
+			return err
+		}
+	default:
+	}
 	w.callStateListeners()
+	return nil
 }
 
-func (w *Watcher[T]) startLocked(c context.Context, ready *sync.WaitGroup) context.Context {
+func (w *Watcher[T]) startLocked(c context.Context, ready *sync.WaitGroup) (context.Context, <-chan error) {
 	defer ready.Done()
 
 	c, w.cancel = context.WithCancel(c)
 	eventCh := make(chan struct{}, 10)
 	go w.handleEvents(c, eventCh)
+
+	errCh := make(chan error, 1)
 
 	w.store = cache.NewStore(cache.DeletionHandlingMetaNamespaceKeyFunc)
 	fifo := cache.NewDeltaFIFOWithOptions(cache.DeltaFIFOOptions{
@@ -241,10 +267,16 @@ func (w *Watcher[T]) startLocked(c context.Context, ready *sync.WaitGroup) conte
 		FullResyncPeriod: resyncPeriod,
 		WatchErrorHandler: func(_ *cache.Reflector, err error) {
 			w.errorHandler(c, err)
+			if !errors.Is(err, context.Canceled) {
+				select {
+				case errCh <- err:
+				default:
+				}
+			}
 		},
 	}
 	w.controller = cache.New(&config)
-	return c
+	return c, errCh
 }
 
 func (w *Watcher[T]) run(c context.Context) {
