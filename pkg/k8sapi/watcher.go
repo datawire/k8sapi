@@ -357,12 +357,11 @@ func (w *Watcher[T]) errorHandler(c context.Context, err error) {
 	default:
 		se := &apierrors.StatusError{}
 		if errors.As(err, &se) {
+			// There's no happy ending here. The API has told us that they can't serve our request, so cancel the watcher.
+			defer w.Cancel()
 			st := se.Status()
 			if st.Code == http.StatusForbidden {
-				// User cannot get the resource from the current namespace, so
-				// we might just as well cancel this watcher
 				dlog.Errorf(c, "Watcher for %s in %s was denied access: %s", w.resource, w.namespace, st.Message)
-				w.Cancel()
 				return
 			}
 			_, i := se.DebugError()
