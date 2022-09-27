@@ -38,27 +38,34 @@ type Watcher[T runtime.Object] struct {
 	store          cache.Store
 	equals         func(T, T) bool
 	stateListeners []*StateListener
+	labelSelector  string
+	fieldSelector  string
 }
 
 type StateListener struct {
 	Cb func()
 }
 
-func newListerWatcher(c context.Context, getter cache.Getter, resource, namespace string) cache.ListerWatcher {
+// hold lock before call
+func (w *Watcher[T]) newListerWatcher(c context.Context) cache.ListerWatcher {
 	// need to dig into how a ListerWatcher is created in order to pass the correct context
 	listFunc := func(options meta.ListOptions) (runtime.Object, error) {
-		return getter.Get().
-			Namespace(namespace).
-			Resource(resource).
+		options.FieldSelector = w.fieldSelector
+		options.LabelSelector = w.labelSelector
+		return w.getter.Get().
+			Namespace(w.namespace).
+			Resource(w.resource).
 			VersionedParams(&options, meta.ParameterCodec).
 			Do(c).
 			Get()
 	}
 	watchFunc := func(options meta.ListOptions) (watch.Interface, error) {
+		options.FieldSelector = w.fieldSelector
+		options.LabelSelector = w.labelSelector
 		options.Watch = true
-		return getter.Get().
-			Namespace(namespace).
-			Resource(resource).
+		return w.getter.Get().
+			Namespace(w.namespace).
+			Resource(w.resource).
 			VersionedParams(&options, meta.ParameterCodec).
 			Watch(c)
 	}
@@ -68,20 +75,22 @@ func newListerWatcher(c context.Context, getter cache.Getter, resource, namespac
 // NewWatcher returns a new watcher. It will not do anything until it is started.
 //
 //	resource string: the kind of resouce you want to watch, like "pods"
-//	namespace string: the namespace to be watched. An empty string watches all namespaces.
 //	getter cache.Getter: a kubernetes rest.Interface client, like clientset.CoreV1().RESTClient()
 //	objType T: an object of the resource type, like &corev1.Pod{}
 //	cond *sync.Cond: cond will broadcast when the cache changes. Use k8sapi.Subscribe to subscribe to events
-//	equals func(T, T) bool: checks if a new obj is equal to a cached obj. If true is returned, an update is not triggered. If this func is nil, an update is always triggered.
-func NewWatcher[T runtime.Object](resource, namespace string, getter cache.Getter, objType T, cond *sync.Cond, equals func(T, T) bool) *Watcher[T] {
-	return &Watcher[T]{
-		resource:  resource,
-		namespace: namespace,
-		equals:    equals,
-		getter:    getter,
-		objType:   objType,
-		cond:      cond,
+func NewWatcher[T runtime.Object](resource string, getter cache.Getter, objType T, cond *sync.Cond, opts ...watcherOpt[T]) *Watcher[T] {
+	watcher := &Watcher[T]{
+		resource: resource,
+		getter:   getter,
+		objType:  objType,
+		cond:     cond,
 	}
+
+	for _, f := range opts {
+		f(watcher)
+	}
+
+	return watcher
 }
 
 // AddStateListener adds a listener function that will be called when the watcher
@@ -158,7 +167,7 @@ func (w *Watcher[T]) Get(c context.Context, obj T) (T, bool, error) {
 	return t.(T), b, e
 }
 
-func (w *Watcher[T]) EnsureStarted(c context.Context, cb func(bool)) {
+func (w *Watcher[T]) EnsureStarted(c context.Context, cb func(bool)) error {
 	w.Lock()
 	defer w.Unlock()
 	if w.store == nil {
@@ -170,10 +179,12 @@ func (w *Watcher[T]) EnsureStarted(c context.Context, cb func(bool)) {
 			}}
 			w.stateListeners = append(w.stateListeners, rl)
 		}
-		w.startOnDemand(c)
-	} else if cb != nil {
+		return w.startOnDemand(c)
+	}
+	if cb != nil {
 		cb(false)
 	}
+	return nil
 }
 
 func (w *Watcher[T]) List(c context.Context) ([]T, error) {
@@ -259,7 +270,7 @@ func (w *Watcher[T]) startLocked(c context.Context, ready *sync.WaitGroup) (cont
 	// we get immediate access to the Process function and can skip the ResourceEventHandlerFuncs
 	config := cache.Config{
 		Queue:         fifo,
-		ListerWatcher: newListerWatcher(c, w.getter, w.resource, w.namespace),
+		ListerWatcher: w.newListerWatcher(c),
 		Process: func(obj any) error {
 			return w.process(c, obj.(cache.Deltas), eventCh)
 		},
