@@ -32,7 +32,6 @@ type Watcher[T runtime.Object] struct {
 	resource       string
 	namespace      string
 	getter         cache.Getter
-	objType        T
 	cond           *sync.Cond
 	controller     cache.Controller
 	store          cache.Store
@@ -78,11 +77,10 @@ func (w *Watcher[T]) newListerWatcher(c context.Context) cache.ListerWatcher {
 //	getter cache.Getter: a kubernetes rest.Interface client, like clientset.CoreV1().RESTClient()
 //	objType T: an object of the resource type, like &corev1.Pod{}
 //	cond *sync.Cond: cond will broadcast when the cache changes. Use k8sapi.Subscribe to subscribe to events
-func NewWatcher[T runtime.Object](resource string, getter cache.Getter, objType T, cond *sync.Cond, opts ...watcherOpt[T]) *Watcher[T] {
+func NewWatcher[T runtime.Object](resource string, getter cache.Getter, cond *sync.Cond, opts ...watcherOpt[T]) *Watcher[T] {
 	watcher := &Watcher[T]{
 		resource: resource,
 		getter:   getter,
-		objType:  objType,
 		cond:     cond,
 	}
 
@@ -268,13 +266,14 @@ func (w *Watcher[T]) startLocked(c context.Context, ready *sync.WaitGroup) (cont
 	// Just creating an informer won't do, because then we cannot set the WatchErrorHandler of
 	// its Config. So we create it from a Config instead, which actually plays out well because
 	// we get immediate access to the Process function and can skip the ResourceEventHandlerFuncs
+	var zeroValue T
 	config := cache.Config{
 		Queue:         fifo,
 		ListerWatcher: w.newListerWatcher(c),
 		Process: func(obj any) error {
 			return w.process(c, obj.(cache.Deltas), eventCh)
 		},
-		ObjectType:       w.objType,
+		ObjectType:       zeroValue,
 		FullResyncPeriod: resyncPeriod,
 		WatchErrorHandler: func(_ *cache.Reflector, err error) {
 			w.errorHandler(c, err)
