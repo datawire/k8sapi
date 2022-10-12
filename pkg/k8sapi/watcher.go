@@ -45,26 +45,25 @@ type StateListener struct {
 	Cb func()
 }
 
-// hold lock before call
-func (w *Watcher[T]) newListerWatcher(c context.Context) cache.ListerWatcher {
+func newListerWatcher(c context.Context, getter cache.Getter, resource, namespace, labelSelector, fieldSelector string) cache.ListerWatcher {
 	// need to dig into how a ListerWatcher is created in order to pass the correct context
 	listFunc := func(options meta.ListOptions) (runtime.Object, error) {
-		options.FieldSelector = w.fieldSelector
-		options.LabelSelector = w.labelSelector
-		return w.getter.Get().
-			Namespace(w.namespace).
-			Resource(w.resource).
+		options.FieldSelector = fieldSelector
+		options.LabelSelector = labelSelector
+		return getter.Get().
+			Namespace(namespace).
+			Resource(resource).
 			VersionedParams(&options, meta.ParameterCodec).
 			Do(c).
 			Get()
 	}
 	watchFunc := func(options meta.ListOptions) (watch.Interface, error) {
-		options.FieldSelector = w.fieldSelector
-		options.LabelSelector = w.labelSelector
+		options.FieldSelector = fieldSelector
+		options.LabelSelector = labelSelector
 		options.Watch = true
-		return w.getter.Get().
-			Namespace(w.namespace).
-			Resource(w.resource).
+		return getter.Get().
+			Namespace(namespace).
+			Resource(resource).
 			VersionedParams(&options, meta.ParameterCodec).
 			Watch(c)
 	}
@@ -269,7 +268,7 @@ func (w *Watcher[T]) startLocked(c context.Context, ready *sync.WaitGroup) (cont
 	var zeroValue T
 	config := cache.Config{
 		Queue:         fifo,
-		ListerWatcher: w.newListerWatcher(c),
+		ListerWatcher: newListerWatcher(c, w.getter, w.resource, w.namespace, w.labelSelector, w.fieldSelector),
 		Process: func(obj any) error {
 			return w.process(c, obj.(cache.Deltas), eventCh)
 		},
