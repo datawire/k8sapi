@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	apps "k8s.io/api/apps/v1"
 	core "k8s.io/api/core/v1"
 	errors2 "k8s.io/apimachinery/pkg/api/errors"
@@ -12,6 +15,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	typedApps "k8s.io/client-go/kubernetes/typed/apps/v1"
+
+	"github.com/telepresenceio/telepresence/v2/pkg/tracing"
 )
 
 type Workload interface {
@@ -27,15 +32,35 @@ func (u UnsupportedWorkloadKindError) Error() string {
 	return fmt.Sprintf("unsupported workload kind: %q", string(u))
 }
 
+func RecordWorkloadInfo(span trace.Span, wl Workload) {
+	if wl == nil {
+		return
+	}
+	span.SetAttributes(
+		attribute.String("tel2.workload-name", wl.GetName()),
+		attribute.String("tel2.workload-namespace", wl.GetNamespace()),
+		attribute.String("tel2.workload-kind", wl.GetKind()),
+	)
+}
+
 // GetWorkload returns a workload for the given name, namespace, and workloadKind. The workloadKind
 // is optional. A search is performed in the following order if it is empty:
 //
-//   1. Deployments
-//   2. ReplicaSets
-//   3. StatefulSets
+//  1. Deployments
+//  2. ReplicaSets
+//  3. StatefulSets
 //
 // The first match is returned.
 func GetWorkload(c context.Context, name, namespace, workloadKind string) (obj Workload, err error) {
+	c, span := otel.GetTracerProvider().Tracer("").Start(c, "k8sapi.GetWorkload",
+		trace.WithAttributes(
+			attribute.String("tel2.workload-name", name),
+			attribute.String("tel2.workload-namespace", namespace),
+			attribute.String("tel2.workload-kind", workloadKind),
+		),
+	)
+	defer tracing.EndAndRecord(span, err)
+
 	switch workloadKind {
 	case "Deployment":
 		obj, err = GetDeployment(c, name, namespace)
@@ -80,7 +105,7 @@ func GetDeployment(c context.Context, name, namespace string) (Workload, error) 
 	return &deployment{d}, nil
 }
 
-// Deployments returns all deployments found in the given Namespace
+// Deployments returns all deployments found in the given Namespace.
 func Deployments(c context.Context, namespace string, labelSelector labels.Set) ([]Workload, error) {
 	ls, err := deployments(c, namespace).List(c, listOptions(labelSelector))
 	if err != nil {
@@ -99,7 +124,7 @@ func Deployment(d *apps.Deployment) Workload {
 }
 
 // DeploymentImpl casts the given Object as an *apps.Deployment and returns
-// it together with a status flag indicating whether the cast was possible
+// it together with a status flag indicating whether the cast was possible.
 func DeploymentImpl(o Object) (*apps.Deployment, bool) {
 	if s, ok := o.(*deployment); ok {
 		return s.Deployment, true
@@ -115,7 +140,7 @@ func GetReplicaSet(c context.Context, name, namespace string) (Workload, error) 
 	return &replicaSet{d}, nil
 }
 
-// ReplicaSets returns all replica sets found in the given Namespace
+// ReplicaSets returns all replica sets found in the given Namespace.
 func ReplicaSets(c context.Context, namespace string, labelSelector labels.Set) ([]Workload, error) {
 	ls, err := replicaSets(c, namespace).List(c, listOptions(labelSelector))
 	if err != nil {
@@ -134,7 +159,7 @@ func ReplicaSet(d *apps.ReplicaSet) Workload {
 }
 
 // ReplicaSetImpl casts the given Object as an *apps.ReplicaSet and returns
-// it together with a status flag indicating whether the cast was possible
+// it together with a status flag indicating whether the cast was possible.
 func ReplicaSetImpl(o Object) (*apps.ReplicaSet, bool) {
 	if s, ok := o.(*replicaSet); ok {
 		return s.ReplicaSet, true
@@ -150,7 +175,7 @@ func GetStatefulSet(c context.Context, name, namespace string) (Workload, error)
 	return &statefulSet{d}, nil
 }
 
-// StatefulSets returns all stateful sets found in the given Namespace
+// StatefulSets returns all stateful sets found in the given Namespace.
 func StatefulSets(c context.Context, namespace string, labelSelector labels.Set) ([]Workload, error) {
 	ls, err := statefulSets(c, namespace).List(c, listOptions(labelSelector))
 	if err != nil {
@@ -169,7 +194,7 @@ func StatefulSet(d *apps.StatefulSet) Workload {
 }
 
 // StatefulSetImpl casts the given Object as an *apps.StatefulSet and returns
-// it together with a status flag indicating whether the cast was possible
+// it together with a status flag indicating whether the cast was possible.
 func StatefulSetImpl(o Object) (*apps.StatefulSet, bool) {
 	if s, ok := o.(*statefulSet); ok {
 		return s.StatefulSet, true
