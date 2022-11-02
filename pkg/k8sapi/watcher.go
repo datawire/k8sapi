@@ -381,3 +381,7 @@ func (w *Watcher[T]) errorHandler(c context.Context, err error) {
 		utilruntime.HandleError(err)
 	}
 }
+
+func (w *Watcher[T]) Subscribe(ctx context.Context) <-chan struct{} {
+	return Subscribe(ctx, w.cond)
+}
