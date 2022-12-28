@@ -4,9 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/trace"
 	apps "k8s.io/api/apps/v1"
 	core "k8s.io/api/core/v1"
 	errors2 "k8s.io/apimachinery/pkg/api/errors"
@@ -15,8 +12,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	typedApps "k8s.io/client-go/kubernetes/typed/apps/v1"
-
-	"github.com/telepresenceio/telepresence/v2/pkg/tracing"
 )
 
 type Workload interface {
@@ -32,17 +27,6 @@ func (u UnsupportedWorkloadKindError) Error() string {
 	return fmt.Sprintf("unsupported workload kind: %q", string(u))
 }
 
-func RecordWorkloadInfo(span trace.Span, wl Workload) {
-	if wl == nil {
-		return
-	}
-	span.SetAttributes(
-		attribute.String("tel2.workload-name", wl.GetName()),
-		attribute.String("tel2.workload-namespace", wl.GetNamespace()),
-		attribute.String("tel2.workload-kind", wl.GetKind()),
-	)
-}
-
 // GetWorkload returns a workload for the given name, namespace, and workloadKind. The workloadKind
 // is optional. A search is performed in the following order if it is empty:
 //
@@ -52,15 +36,6 @@ func RecordWorkloadInfo(span trace.Span, wl Workload) {
 //
 // The first match is returned.
 func GetWorkload(c context.Context, name, namespace, workloadKind string) (obj Workload, err error) {
-	c, span := otel.GetTracerProvider().Tracer("").Start(c, "k8sapi.GetWorkload",
-		trace.WithAttributes(
-			attribute.String("tel2.workload-name", name),
-			attribute.String("tel2.workload-namespace", namespace),
-			attribute.String("tel2.workload-kind", workloadKind),
-		),
-	)
-	defer tracing.EndAndRecord(span, err)
-
 	switch workloadKind {
 	case "Deployment":
 		obj, err = GetDeployment(c, name, namespace)
