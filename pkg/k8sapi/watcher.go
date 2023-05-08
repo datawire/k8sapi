@@ -213,9 +213,9 @@ func (w *Watcher[T]) Watch(c context.Context, ready *sync.WaitGroup) error {
 	func() {
 		w.Lock()
 		defer w.Unlock()
-		c, errCh = w.startLocked(c, ready)
+		c, errCh = w.createConfig(c)
 	}()
-	w.run(c)
+	w.run(c, ready)
 	select {
 	case err := <-errCh:
 		return err
@@ -225,11 +225,11 @@ func (w *Watcher[T]) Watch(c context.Context, ready *sync.WaitGroup) error {
 }
 
 func (w *Watcher[T]) startOnDemand(c context.Context) error {
+	c, errCh := w.createConfig(c)
 	rdy := sync.WaitGroup{}
 	rdy.Add(1)
-	c, errCh := w.startLocked(c, &rdy)
+	go w.run(c, &rdy)
 	rdy.Wait()
-	go w.run(c)
 	// We're about to sit waiting for the cache. It's a bad idea to do so while we're holding the lock.
 	// WaitForCacheSync isn't gonna touch any state that the lock cares about anyway, and there are
 	// things going on in the background of startLocked and run that will want that lock
@@ -247,9 +247,7 @@ func (w *Watcher[T]) startOnDemand(c context.Context) error {
 	return nil
 }
 
-func (w *Watcher[T]) startLocked(c context.Context, ready *sync.WaitGroup) (context.Context, <-chan error) {
-	defer ready.Done()
-
+func (w *Watcher[T]) createConfig(c context.Context) (context.Context, <-chan error) {
 	c, w.cancel = context.WithCancel(c)
 	eventCh := make(chan struct{}, 10)
 	go w.handleEvents(c, eventCh)
@@ -269,7 +267,7 @@ func (w *Watcher[T]) startLocked(c context.Context, ready *sync.WaitGroup) (cont
 	config := cache.Config{
 		Queue:         fifo,
 		ListerWatcher: newListerWatcher(c, w.getter, w.resource, w.namespace, w.labelSelector, w.fieldSelector),
-		Process: func(obj any) error {
+		Process: func(obj any, _ bool) error {
 			return w.process(c, obj.(cache.Deltas), eventCh)
 		},
 		ObjectType:       zeroValue,
@@ -288,9 +286,16 @@ func (w *Watcher[T]) startLocked(c context.Context, ready *sync.WaitGroup) (cont
 	return c, errCh
 }
 
-func (w *Watcher[T]) run(c context.Context) {
+func (w *Watcher[T]) run(c context.Context, ready *sync.WaitGroup) {
 	defer dlog.Debugf(c, "Watcher for %s in %s stopped", w.resource, w.namespace)
 	dlog.Debugf(c, "Watcher for %s in %s started", w.resource, w.namespace)
+
+	// Give the Run a short time to get going so that HasSynced doesn't return true
+	// because the controller hasn't started yet.
+	time.AfterFunc(10*time.Millisecond, func() {
+		dlog.Debug(c, "signalling done")
+		ready.Done()
+	})
 	w.controller.Run(c.Done())
 }
 
