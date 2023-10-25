@@ -76,7 +76,7 @@ func newListerWatcher(c context.Context, getter cache.Getter, resource, namespac
 //	getter cache.Getter: a kubernetes rest.Interface client, like clientset.CoreV1().RESTClient()
 //	objType T: an object of the resource type, like &corev1.Pod{}
 //	cond *sync.Cond: cond will broadcast when the cache changes. Use k8sapi.Subscribe to subscribe to events
-func NewWatcher[T runtime.Object](resource string, getter cache.Getter, cond *sync.Cond, opts ...watcherOpt[T]) *Watcher[T] {
+func NewWatcher[T runtime.Object](resource string, getter cache.Getter, cond *sync.Cond, opts ...WatcherOpt[T]) *Watcher[T] {
 	watcher := &Watcher[T]{
 		resource: resource,
 		getter:   getter,
