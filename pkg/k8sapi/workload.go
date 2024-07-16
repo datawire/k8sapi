@@ -3,7 +3,10 @@ package k8sapi
 import (
 	"context"
 	"fmt"
+	"strconv"
 
+	argoRollout "github.com/argoproj/argo-rollouts/pkg/apis/rollouts/v1alpha1"
+	argoRollouts "github.com/argoproj/argo-rollouts/pkg/client/clientset/versioned/typed/rollouts/v1alpha1"
 	apps "k8s.io/api/apps/v1"
 	core "k8s.io/api/core/v1"
 	errors2 "k8s.io/apimachinery/pkg/api/errors"
@@ -33,6 +36,7 @@ func (u UnsupportedWorkloadKindError) Error() string {
 //  1. Deployments
 //  2. ReplicaSets
 //  3. StatefulSets
+//  4. Rollouts (Argo Rollouts)
 //
 // The first match is returned.
 func GetWorkload(c context.Context, name, namespace, workloadKind string) (obj Workload, err error) {
@@ -43,8 +47,10 @@ func GetWorkload(c context.Context, name, namespace, workloadKind string) (obj W
 		obj, err = GetReplicaSet(c, name, namespace)
 	case "StatefulSet":
 		obj, err = GetStatefulSet(c, name, namespace)
+	case "Rollout":
+		obj, err = GetRollout(c, name, namespace)
 	case "":
-		for _, wk := range []string{"Deployment", "ReplicaSet", "StatefulSet"} {
+		for _, wk := range []string{"Deployment", "ReplicaSet", "StatefulSet", "Rollout"} {
 			if obj, err = GetWorkload(c, name, namespace, wk); err == nil {
 				return obj, nil
 			}
@@ -67,6 +73,8 @@ func WrapWorkload(workload runtime.Object) (Workload, error) {
 		return ReplicaSet(workload), nil
 	case *apps.StatefulSet:
 		return StatefulSet(workload), nil
+	case *argoRollout.Rollout:
+		return Rollout(workload), nil
 	default:
 		return nil, fmt.Errorf("unsupported workload type %T", workload)
 	}
@@ -103,6 +111,41 @@ func Deployment(d *apps.Deployment) Workload {
 func DeploymentImpl(o Object) (*apps.Deployment, bool) {
 	if s, ok := o.(*deployment); ok {
 		return s.Deployment, true
+	}
+	return nil, false
+}
+
+func GetRollout(c context.Context, name, namespace string) (Workload, error) {
+	r, err := rollouts(c, namespace).Get(c, name, meta.GetOptions{})
+	if err != nil {
+		return nil, err
+	}
+	return &rollout{r}, nil
+}
+
+// Rollouts returns all rollouts found in the given Namespace.
+func Rollouts(c context.Context, namespace string, labelSelector labels.Set) ([]Workload, error) {
+	ls, err := rollouts(c, namespace).List(c, listOptions(labelSelector))
+	if err != nil {
+		return nil, err
+	}
+	is := ls.Items
+	os := make([]Workload, len(is))
+	for i := range is {
+		os[i] = Rollout(&is[i])
+	}
+	return os, nil
+}
+
+func Rollout(r *argoRollout.Rollout) Workload {
+	return &rollout{r}
+}
+
+// RolloutImpl casts the given Object as an *argoRollout.Rollout and returns
+// it together with a status flag indicating whether the cast was possible.
+func RolloutImpl(o Object) (*argoRollout.Rollout, bool) {
+	if s, ok := o.(*rollout); ok {
+		return s.Rollout, true
 	}
 	return nil, false
 }
@@ -236,6 +279,77 @@ func (o *deployment) Update(c context.Context) error {
 func (o *deployment) Updated(origGeneration int64) bool {
 	applied := o.ObjectMeta.Generation >= origGeneration &&
 		o.Status.ObservedGeneration == o.ObjectMeta.Generation &&
+		(o.Spec.Replicas == nil || o.Status.UpdatedReplicas >= *o.Spec.Replicas) &&
+		o.Status.UpdatedReplicas == o.Status.Replicas &&
+		o.Status.AvailableReplicas == o.Status.Replicas
+	return applied
+}
+
+type rollout struct {
+	*argoRollout.Rollout
+}
+
+func rollouts(c context.Context, namespace string) argoRollouts.RolloutInterface {
+	restConfig := *GetK8sRestConfig(c)
+	cs, err := argoRollouts.NewForConfig(&restConfig)
+	if err != nil {
+		panic(fmt.Sprintf("failed to create argo-rollouts client: %v", err))
+	}
+
+	return cs.Rollouts(namespace)
+}
+
+func (o *rollout) ki(c context.Context) argoRollouts.RolloutInterface {
+	return rollouts(c, o.Namespace)
+}
+
+func (o *rollout) GetKind() string {
+	return "Rollout"
+}
+
+func (o *rollout) Delete(c context.Context) error {
+	return o.ki(c).Delete(c, o.Name, meta.DeleteOptions{})
+}
+
+func (o *rollout) GetPodTemplate() *core.PodTemplateSpec {
+	return &o.Spec.Template
+}
+
+func (o *rollout) Patch(c context.Context, pt types.PatchType, data []byte, subresources ...string) error {
+	r, err := o.ki(c).Patch(c, o.Name, pt, data, meta.PatchOptions{}, subresources...)
+	if err == nil {
+		o.Rollout = r
+	}
+	return err
+}
+
+func (o *rollout) Refresh(c context.Context) error {
+	d, err := o.ki(c).Get(c, o.Name, meta.GetOptions{})
+	if err == nil {
+		o.Rollout = d
+	}
+	return err
+}
+
+func (o *rollout) Replicas() int {
+	return int(o.Status.Replicas)
+}
+
+func (o *rollout) Selector() (labels.Selector, error) {
+	return meta.LabelSelectorAsSelector(o.Spec.Selector)
+}
+
+func (o *rollout) Update(c context.Context) error {
+	d, err := o.ki(c).Update(c, o.Rollout, meta.UpdateOptions{})
+	if err == nil {
+		o.Rollout = d
+	}
+	return err
+}
+
+func (o *rollout) Updated(origGeneration int64) bool {
+	applied := o.ObjectMeta.Generation >= origGeneration &&
+		o.Status.ObservedGeneration == strconv.FormatInt(o.ObjectMeta.Generation, 10) &&
 		(o.Spec.Replicas == nil || o.Status.UpdatedReplicas >= *o.Spec.Replicas) &&
 		o.Status.UpdatedReplicas == o.Status.Replicas &&
 		o.Status.AvailableReplicas == o.Status.Replicas

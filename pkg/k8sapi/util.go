@@ -3,6 +3,7 @@ package k8sapi
 import (
 	"context"
 	"fmt"
+	"k8s.io/client-go/rest"
 	"strings"
 	"sync"
 
@@ -27,6 +28,20 @@ func GetK8sInterface(ctx context.Context) kubernetes.Interface {
 }
 
 type kiKey struct{}
+
+func WithK8sRestConfig(ctx context.Context, rc *rest.Config) context.Context {
+	return context.WithValue(ctx, rcKey{}, rc)
+}
+
+func GetK8sRestConfig(ctx context.Context) *rest.Config {
+	rc, ok := ctx.Value(rcKey{}).(*rest.Config)
+	if !ok {
+		panic("K8sRestConfig requested from a context that has none")
+	}
+	return rc
+}
+
+type rcKey struct{}
 
 // GetPort finds a port with the given name and returns it.
 func GetPort(cn *core.Container, portName string) (*core.ContainerPort, error) {
