@@ -3,16 +3,15 @@ package k8sapi
 import (
 	"context"
 	"fmt"
-	"k8s.io/client-go/rest"
 	"strings"
 	"sync"
 
+	argoRollouts "github.com/datawire/argo-rollouts-go-client/pkg/client/clientset/versioned"
+	"github.com/datawire/dlib/dlog"
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
-
-	"github.com/datawire/dlib/dlog"
 )
 
 func WithK8sInterface(ctx context.Context, ki kubernetes.Interface) context.Context {
@@ -29,19 +28,19 @@ func GetK8sInterface(ctx context.Context) kubernetes.Interface {
 
 type kiKey struct{}
 
-func WithK8sRestConfig(ctx context.Context, rc *rest.Config) context.Context {
-	return context.WithValue(ctx, rcKey{}, rc)
+func WithArgoRolloutsInterface(ctx context.Context, ari argoRollouts.Interface) context.Context {
+	return context.WithValue(ctx, ariKey{}, ari)
 }
 
-func GetK8sRestConfig(ctx context.Context) *rest.Config {
-	rc, ok := ctx.Value(rcKey{}).(*rest.Config)
+func GetArgoRolloutsInterface(ctx context.Context) argoRollouts.Interface {
+	cs, ok := ctx.Value(ariKey{}).(argoRollouts.Interface)
 	if !ok {
-		panic("K8sRestConfig requested from a context that has none")
+		panic("GetArgoRolloutsInterface requested from a context that has none")
 	}
-	return rc
+	return cs
 }
 
-type rcKey struct{}
+type ariKey struct{}
 
 // GetPort finds a port with the given name and returns it.
 func GetPort(cn *core.Container, portName string) (*core.ContainerPort, error) {

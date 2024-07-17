@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strconv"
 
-	argoRollout "github.com/argoproj/argo-rollouts/pkg/apis/rollouts/v1alpha1"
-	argoRollouts "github.com/argoproj/argo-rollouts/pkg/client/clientset/versioned/typed/rollouts/v1alpha1"
+	argoRollouts "github.com/datawire/argo-rollouts-go-client/pkg/apis/rollouts/v1alpha1"
+	typedArgoRollouts "github.com/datawire/argo-rollouts-go-client/pkg/client/clientset/versioned/typed/rollouts/v1alpha1"
 	apps "k8s.io/api/apps/v1"
 	core "k8s.io/api/core/v1"
 	errors2 "k8s.io/apimachinery/pkg/api/errors"
@@ -73,7 +73,7 @@ func WrapWorkload(workload runtime.Object) (Workload, error) {
 		return ReplicaSet(workload), nil
 	case *apps.StatefulSet:
 		return StatefulSet(workload), nil
-	case *argoRollout.Rollout:
+	case *argoRollouts.Rollout:
 		return Rollout(workload), nil
 	default:
 		return nil, fmt.Errorf("unsupported workload type %T", workload)
@@ -137,13 +137,13 @@ func Rollouts(c context.Context, namespace string, labelSelector labels.Set) ([]
 	return os, nil
 }
 
-func Rollout(r *argoRollout.Rollout) Workload {
+func Rollout(r *argoRollouts.Rollout) Workload {
 	return &rollout{r}
 }
 
 // RolloutImpl casts the given Object as an *argoRollout.Rollout and returns
 // it together with a status flag indicating whether the cast was possible.
-func RolloutImpl(o Object) (*argoRollout.Rollout, bool) {
+func RolloutImpl(o Object) (*argoRollouts.Rollout, bool) {
 	if s, ok := o.(*rollout); ok {
 		return s.Rollout, true
 	}
@@ -286,20 +286,14 @@ func (o *deployment) Updated(origGeneration int64) bool {
 }
 
 type rollout struct {
-	*argoRollout.Rollout
+	*argoRollouts.Rollout
 }
 
-func rollouts(c context.Context, namespace string) argoRollouts.RolloutInterface {
-	restConfig := *GetK8sRestConfig(c)
-	cs, err := argoRollouts.NewForConfig(&restConfig)
-	if err != nil {
-		panic(fmt.Sprintf("failed to create argo-rollouts client: %v", err))
-	}
-
-	return cs.Rollouts(namespace)
+func rollouts(c context.Context, namespace string) typedArgoRollouts.RolloutInterface {
+	return GetArgoRolloutsInterface(c).ArgoprojV1alpha1().Rollouts(namespace)
 }
 
-func (o *rollout) ki(c context.Context) argoRollouts.RolloutInterface {
+func (o *rollout) ki(c context.Context) typedArgoRollouts.RolloutInterface {
 	return rollouts(c, o.Namespace)
 }
 
