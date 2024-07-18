@@ -15,7 +15,7 @@ import (
 )
 
 func WithJoinedClientSetInterface(ctx context.Context, ki kubernetes.Interface, ari argoRollouts.Interface) context.Context {
-	return context.WithValue(WithK8sInterface(ctx, ki), jiKey{}, NewJoinedClientSetInterface(ki, ari))
+	return WithArgoRolloutCRDState(context.WithValue(WithK8sInterface(ctx, ki), jiKey{}, NewJoinedClientSetInterface(ki, ari)), ki)
 }
 
 func GetJoinedClientSetInterface(ctx context.Context) JoinedClientSetInterface {
@@ -39,9 +39,33 @@ func GetK8sInterface(ctx context.Context) kubernetes.Interface {
 	return ki
 }
 
+func WithArgoRolloutCRDState(ctx context.Context, ki kubernetes.Interface) context.Context {
+	value := false
+	if list, err := ki.Discovery().ServerGroups(); err == nil {
+		for _, r := range list.Groups {
+			if r.Name == "rollouts" {
+				value = true
+				break
+			}
+		}
+	}
+
+	return context.WithValue(ctx, argoCrdKey{}, value)
+}
+
+func GetArgoRolloutCRDState(ctx context.Context) bool {
+	value, ok := ctx.Value(argoCrdKey{}).(bool)
+	if !ok {
+		panic("ArgoRolloutCRDState requested from a context that has none")
+	}
+	return value
+}
+
 type kiKey struct{}
 
 type jiKey struct{}
+
+type argoCrdKey struct{}
 
 // GetPort finds a port with the given name and returns it.
 func GetPort(cn *core.Container, portName string) (*core.ContainerPort, error) {
