@@ -290,7 +290,7 @@ type rollout struct {
 }
 
 func rollouts(c context.Context, namespace string) typedArgoRollouts.RolloutInterface {
-	return GetArgoRolloutsInterface(c).ArgoprojV1alpha1().Rollouts(namespace)
+	return GetJoinedClientSetInterface(c).ArgoprojV1alpha1().Rollouts(namespace)
 }
 
 func (o *rollout) ki(c context.Context) typedArgoRollouts.RolloutInterface {
