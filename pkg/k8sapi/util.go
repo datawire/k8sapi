@@ -14,6 +14,19 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
+func WithJoinedClientSetInterface(ctx context.Context, ki kubernetes.Interface, ari argoRollouts.Interface) context.Context {
+	return context.WithValue(WithK8sInterface(ctx, ki), jiKey{}, NewJoinedClientSetInterface(ki, ari))
+}
+
+func GetJoinedClientSetInterface(ctx context.Context) JoinedClientSetInterface {
+	ji, ok := ctx.Value(jiKey{}).(JoinedClientSetInterface)
+	if !ok {
+		panic("GetJoinedClientSetInterface requested from a context that has none")
+	}
+
+	return ji
+}
+
 func WithK8sInterface(ctx context.Context, ki kubernetes.Interface) context.Context {
 	return context.WithValue(ctx, kiKey{}, ki)
 }
@@ -28,19 +41,7 @@ func GetK8sInterface(ctx context.Context) kubernetes.Interface {
 
 type kiKey struct{}
 
-func WithArgoRolloutsInterface(ctx context.Context, ari argoRollouts.Interface) context.Context {
-	return context.WithValue(ctx, ariKey{}, ari)
-}
-
-func GetArgoRolloutsInterface(ctx context.Context) argoRollouts.Interface {
-	cs, ok := ctx.Value(ariKey{}).(argoRollouts.Interface)
-	if !ok {
-		panic("GetArgoRolloutsInterface requested from a context that has none")
-	}
-	return cs
-}
-
-type ariKey struct{}
+type jiKey struct{}
 
 // GetPort finds a port with the given name and returns it.
 func GetPort(cn *core.Container, portName string) (*core.ContainerPort, error) {
