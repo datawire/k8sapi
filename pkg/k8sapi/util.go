@@ -6,13 +6,26 @@ import (
 	"strings"
 	"sync"
 
+	argoRollouts "github.com/datawire/argo-rollouts-go-client/pkg/client/clientset/versioned"
+	"github.com/datawire/dlib/dlog"
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
-
-	"github.com/datawire/dlib/dlog"
 )
+
+func WithJoinedClientSetInterface(ctx context.Context, ki kubernetes.Interface, ari argoRollouts.Interface) context.Context {
+	return context.WithValue(WithK8sInterface(ctx, ki), jiKey{}, NewJoinedClientSetInterface(ki, ari))
+}
+
+func GetJoinedClientSetInterface(ctx context.Context) JoinedClientSetInterface {
+	ji, ok := ctx.Value(jiKey{}).(JoinedClientSetInterface)
+	if !ok {
+		panic("GetJoinedClientSetInterface requested from a context that has none")
+	}
+
+	return ji
+}
 
 func WithK8sInterface(ctx context.Context, ki kubernetes.Interface) context.Context {
 	return context.WithValue(ctx, kiKey{}, ki)
@@ -27,6 +40,8 @@ func GetK8sInterface(ctx context.Context) kubernetes.Interface {
 }
 
 type kiKey struct{}
+
+type jiKey struct{}
 
 // GetPort finds a port with the given name and returns it.
 func GetPort(cn *core.Container, portName string) (*core.ContainerPort, error) {
