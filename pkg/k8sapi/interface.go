@@ -69,13 +69,6 @@ type joinedClientSetInterface struct {
 	ari argoRollouts.Interface
 }
 
-func NewJoinedClientSetInterface(ki kubernetes.Interface, ari argoRollouts.Interface) JoinedClientSetInterface {
-	return &joinedClientSetInterface{
-		ki:  ki,
-		ari: ari,
-	}
-}
-
 func (s *joinedClientSetInterface) Discovery() discovery.DiscoveryInterface {
 	return s.ki.Discovery()
 }
