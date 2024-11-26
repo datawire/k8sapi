@@ -15,20 +15,30 @@ import (
 )
 
 func WithJoinedClientSetInterface(ctx context.Context, ki kubernetes.Interface, ari argoRollouts.Interface) context.Context {
-	return context.WithValue(WithK8sInterface(ctx, ki), jiKey{}, NewJoinedClientSetInterface(ki, ari))
+	return WithArgoRolloutsInterface(WithK8sInterface(ctx, ki), ari)
 }
 
 func GetJoinedClientSetInterface(ctx context.Context) JoinedClientSetInterface {
-	ji, ok := ctx.Value(jiKey{}).(JoinedClientSetInterface)
-	if !ok {
-		panic("GetJoinedClientSetInterface requested from a context that has none")
+	return &joinedClientSetInterface{
+		GetK8sInterface(ctx),
+		GetArgoRolloutsInterface(ctx),
 	}
+}
 
-	return ji
+func WithArgoRolloutsInterface(ctx context.Context, ari argoRollouts.Interface) context.Context {
+	return context.WithValue(ctx, ariKey{}, ari)
 }
 
 func WithK8sInterface(ctx context.Context, ki kubernetes.Interface) context.Context {
 	return context.WithValue(ctx, kiKey{}, ki)
+}
+
+func GetArgoRolloutsInterface(ctx context.Context) argoRollouts.Interface {
+	ari, ok := ctx.Value(ariKey{}).(argoRollouts.Interface)
+	if !ok {
+		return nil
+	}
+	return ari
 }
 
 func GetK8sInterface(ctx context.Context) kubernetes.Interface {
@@ -41,7 +51,7 @@ func GetK8sInterface(ctx context.Context) kubernetes.Interface {
 
 type kiKey struct{}
 
-type jiKey struct{}
+type ariKey struct{}
 
 // GetPort finds a port with the given name and returns it.
 func GetPort(cn *core.Container, portName string) (*core.ContainerPort, error) {

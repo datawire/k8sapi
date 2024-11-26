@@ -20,10 +20,3 @@ type joinedClientSetInterface struct {
 func (j joinedClientSetInterface) ArgoprojV1alpha1() typedArgoRollouts.ArgoprojV1alpha1Interface {
 	return j.ari.ArgoprojV1alpha1()
 }
-
-func NewJoinedClientSetInterface(ki kubernetes.Interface, ari argoRollouts.Interface) JoinedClientSetInterface {
-	return &joinedClientSetInterface{
-		Interface: ki,
-		ari:       ari,
-	}
-}
