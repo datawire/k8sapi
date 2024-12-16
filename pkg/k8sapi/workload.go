@@ -116,7 +116,12 @@ func DeploymentImpl(o Object) (*apps.Deployment, bool) {
 }
 
 func GetRollout(c context.Context, name, namespace string) (Workload, error) {
-	r, err := rollouts(c, namespace).Get(c, name, meta.GetOptions{})
+	client := rollouts(c, namespace)
+	if client == nil {
+		return nil, fmt.Errorf("argo rollouts client not available")
+	}
+
+	r, err := client.Get(c, name, meta.GetOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -125,7 +130,12 @@ func GetRollout(c context.Context, name, namespace string) (Workload, error) {
 
 // Rollouts returns all rollouts found in the given Namespace.
 func Rollouts(c context.Context, namespace string, labelSelector labels.Set) ([]Workload, error) {
-	ls, err := rollouts(c, namespace).List(c, listOptions(labelSelector))
+	client := rollouts(c, namespace)
+	if client == nil {
+		return nil, fmt.Errorf("argo rollouts client not available")
+	}
+
+	ls, err := client.List(c, listOptions(labelSelector))
 	if err != nil {
 		return nil, err
 	}
@@ -290,7 +300,11 @@ type rollout struct {
 }
 
 func rollouts(c context.Context, namespace string) typedArgoRollouts.RolloutInterface {
-	return GetJoinedClientSetInterface(c).ArgoprojV1alpha1().Rollouts(namespace)
+	ari := GetArgoRolloutsInterface(c)
+	if ari == nil {
+		return nil
+	}
+	return ari.ArgoprojV1alpha1().Rollouts(namespace)
 }
 
 func (o *rollout) ki(c context.Context) typedArgoRollouts.RolloutInterface {
