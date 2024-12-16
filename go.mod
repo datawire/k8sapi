@@ -5,7 +5,7 @@ go 1.23.0
 toolchain go1.23.2
 
 require (
-	github.com/datawire/argo-rollouts-go-client v0.0.0-20240820134429-7eacf8d19d55
+	github.com/datawire/argo-rollouts-go-client v0.0.0-20241216133646-cb1073556c99
 	github.com/datawire/dlib v1.3.1
 	github.com/hashicorp/go-multierror v1.1.1
 	gopkg.in/yaml.v3 v3.0.1
@@ -54,5 +54,3 @@ require (
 	sigs.k8s.io/structured-merge-diff/v4 v4.5.0 // indirect
 	sigs.k8s.io/yaml v1.4.0 // indirect
 )
-
-replace github.com/datawire/argo-rollouts-go-client => github.com/thallgren/argo-rollouts-go-client v0.0.0-20241213112306-b3d4cb17f6ac
